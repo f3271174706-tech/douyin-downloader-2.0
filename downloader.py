@@ -354,12 +354,62 @@ def _extract_ytdlp(url: str, platform: str) -> dict:
 
 
 def _extract_bilibili(url: str) -> dict:
-    """Extract Bilibili video info via yt-dlp."""
+    """Extract Bilibili video info via API (no cookies needed for 480p)."""
     # Resolve b23.tv short links
     if "b23.tv" in url:
         r = httpx.get(url, headers={"User-Agent": MOBILE_UA}, follow_redirects=True, timeout=15)
         url = str(r.url)
-    return _extract_ytdlp(url, "bilibili")
+
+    # Extract BV ID (with or without BV prefix)
+    bv_match = re.search(r'(BV[\w]+)', url)
+    if bv_match:
+        bvid = bv_match.group(1)
+    else:
+        # Try /video/ID format (may be missing BV prefix)
+        id_match = re.search(r'/video/([\w]+)', url)
+        if id_match:
+            raw_id = id_match.group(1)
+            bvid = raw_id if raw_id.startswith("BV") else "BV" + raw_id
+        else:
+            raise ValueError(f"无法从链接中提取 BV ID: {url}")
+
+    headers = {"User-Agent": MOBILE_UA, "Referer": "https://www.bilibili.com/"}
+
+    # Step 1: Get video info
+    info_url = f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}"
+    r = httpx.get(info_url, headers=headers, timeout=15)
+    data = r.json()
+    if data.get("code") != 0:
+        raise ValueError(data.get("message", "B站 API 错误"))
+
+    video_data = data["data"]
+    title = video_data.get("title", "未知标题")
+    cid = video_data.get("cid")
+    thumbnail = video_data.get("pic", "")
+    if thumbnail.startswith("//"):
+        thumbnail = "https:" + thumbnail
+
+    # Step 2: Get video stream URL (durl = single file, no need to merge)
+    play_url = f"https://api.bilibili.com/x/player/playurl?bvid={bvid}&cid={cid}&qn=80&fnval=0"
+    r = httpx.get(play_url, headers=headers, timeout=15)
+    play_data = r.json()
+    if play_data.get("code") != 0:
+        raise ValueError(play_data.get("message", "B站播放地址获取失败"))
+
+    durls = play_data["data"].get("durl", [])
+    if not durls:
+        raise ValueError("B站未返回视频地址")
+
+    video_url = durls[0].get("url", "")
+
+    return {
+        "title": title,
+        "thumbnail": thumbnail,
+        "duration": video_data.get("duration", 0),
+        "type": "video",
+        "video_url": video_url,
+        "platform": "bilibili",
+    }
 
 
 def _extract_kuaishou(url: str) -> dict:
@@ -569,7 +619,9 @@ def download_video(
         filepath, filename = _download_twitter_video(url)
     elif _is_kuaishou(url):
         filepath, filename = _download_kuaishou_video(url)
-    elif _is_bilibili(url) or _is_tiktok(url):
+    elif _is_bilibili(url):
+        filepath, filename = _download_bilibili_video(url)
+    elif _is_tiktok(url):
         filepath, filename = _download_tiktok(url)
     else:
         raise ValueError("不支持的平台链接")
@@ -709,6 +761,27 @@ def _download_kuaishou_video(url: str) -> tuple[str, str]:
     return filepath, filename
 
 
+def _download_bilibili_video(url: str) -> tuple[str, str]:
+    """Download Bilibili video via API + direct HTTP."""
+    info = extract_video_info(url)
+    video_url = info.get("video_url", "")
+    if not video_url:
+        raise ValueError("未能提取视频下载地址")
+
+    headers = {"User-Agent": MOBILE_UA, "Referer": "https://www.bilibili.com/"}
+    r = httpx.get(video_url, headers=headers, follow_redirects=True, timeout=120)
+
+    safe_title = re.sub(r'[\n\r\t\\/*?:"<>|#]', '', info["title"])[:50]
+    filename = f"{safe_title}.mp4" if safe_title else f"{uuid.uuid4().hex[:12]}.mp4"
+    filepath = str(DOWNLOADS_DIR / filename)
+
+    with open(filepath, "wb") as f:
+        f.write(r.content)
+
+    _schedule_cleanup(filepath)
+    return filepath, filename
+
+
 def download_video_for_stream(video_url: str) -> tuple[str, str]:
     """Download a video from its CDN URL for streaming. Returns (filepath, filename)."""
     _ensure_downloads_dir()
@@ -722,6 +795,8 @@ def download_video_for_stream(video_url: str) -> tuple[str, str]:
         proxy = PROXY_URL
     elif "tiktokcdn" in video_url:
         headers["Referer"] = "https://www.tiktok.com/"
+    elif "bilibili" in video_url or "bilivideo" in video_url or "hdslb" in video_url:
+        headers["Referer"] = "https://www.bilibili.com/"
         proxy = PROXY_URL
 
     verify = "kwaicdn" not in video_url and "kuaishou" not in video_url
