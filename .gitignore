@@ -1,0 +1,6 @@
+__pycache__/
+downloads/
+.claude/
+*.pyc
+DEPLOY.md
+cloudflared
