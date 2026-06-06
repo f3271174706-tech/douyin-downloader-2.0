@@ -331,6 +331,13 @@ video::-webkit-media-controls-enclosure {
           <span id="downloadText">Download</span>
           <div id="downloadSpinner" class="hidden spinner"></div>
         </button>
+        <!-- Progress Bar -->
+        <div id="progressWrap" class="hidden w-full">
+          <div class="w-full h-1.5 rounded-full bg-white/5 overflow-hidden">
+            <div id="progressBar" class="h-full rounded-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300" style="width:0%"></div>
+          </div>
+          <p id="progressText" class="text-[11px] text-white/30 mt-1.5 text-center"></p>
+        </div>
 
         <button onclick="location.reload()" class="w-full text-xs text-white/20 hover:text-white/35 py-1 transition-colors">Reset</button>
       </div>
@@ -620,25 +627,71 @@ async function downloadCurrentPhoto() {
   finally { btn.disabled = false; document.getElementById('downloadSpinner').classList.add('hidden'); document.getElementById('downloadText').textContent = 'Download Image'; }
 }
 
-async function downloadVideo() {
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function downloadVideo() {
   if (!currentUrl) return;
   if (currentContentType === 'photo') return downloadCurrentPhoto();
   const btn = document.getElementById('downloadBtn'); btn.disabled = true;
-  document.getElementById('downloadText').textContent = 'Downloading...';
-  document.getElementById('downloadSpinner').classList.remove('hidden');
-  try {
-    const res = await fetch('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: currentUrl, quality: currentQuality, type: currentType }) });
-    if (!res.ok) { const d = await res.json(); throw new Error(d.detail); }
-    const blob = await res.blob();
+  const textEl = document.getElementById('downloadText');
+  const spinner = document.getElementById('downloadSpinner');
+  const progressWrap = document.getElementById('progressWrap');
+  const progressBar = document.getElementById('progressBar');
+  const progressText = document.getElementById('progressText');
+  textEl.textContent = 'Downloading...';
+  spinner.classList.remove('hidden');
+  progressWrap.classList.remove('hidden');
+  progressBar.style.width = '0%';
+  progressText.textContent = '';
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/download');
+  xhr.setRequestHeader('Content-Type', 'application/json');
+  xhr.responseType = 'blob';
+
+  xhr.onprogress = function(e) {
+    if (e.lengthComputable) {
+      const pct = Math.round((e.loaded / e.total) * 100);
+      progressBar.style.width = pct + '%';
+      progressText.textContent = pct + '% · ' + formatSize(e.loaded) + ' / ' + formatSize(e.total);
+    } else if (e.loaded > 0) {
+      progressText.textContent = formatSize(e.loaded);
+    }
+  };
+
+  xhr.onload = function() {
+    if (xhr.status >= 400) {
+      try {
+        const err = JSON.parse(xhr.responseText);
+        showToast(err.detail || 'Download failed', 'error');
+      } catch { showToast('Download failed', 'error'); }
+      return;
+    }
     let fn = 'video.mp4';
-    const disp = res.headers.get('Content-Disposition') || '';
+    const disp = xhr.getResponseHeader('Content-Disposition') || '';
     const rfc = disp.match(/filename\*=(?:UTF-8|utf-8)''(.+?)(?:;|$)/i);
-    if (rfc) fn = decodeURIComponent(rfc[1]); else { const m = disp.match(/filename="?(.+?)"?$/); if (m) fn = m[1]; }
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = fn;
+    if (rfc) fn = decodeURIComponent(rfc[1]);
+    else { const m = disp.match(/filename="?(.+?)"?$/); if (m) fn = m[1]; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(xhr.response); a.download = fn;
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
+    progressBar.style.width = '100%';
+    progressText.textContent = 'Done!';
     updateLabel();
-  } catch (e) { showToast(e.message, 'error'); updateLabel(); }
-  finally { btn.disabled = false; document.getElementById('downloadSpinner').classList.add('hidden'); }
+  };
+
+  xhr.onerror = function() { showToast('Network error', 'error'); };
+
+  xhr.onloadend = function() {
+    btn.disabled = false;
+    spinner.classList.add('hidden');
+    setTimeout(() => { progressWrap.classList.add('hidden'); }, 3000);
+  };
+
+  xhr.send(JSON.stringify({ url: currentUrl, quality: currentQuality, type: currentType }));
 }
 
 // ═══ Helpers ═══
