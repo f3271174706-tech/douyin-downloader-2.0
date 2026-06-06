@@ -1,14 +1,24 @@
 # 多平台无水印下载器
 
-在线粘贴抖音、X(Twitter)、B站、快手、TikTok 分享链接，无水印下载视频、提取音频、保存图文图片。
+在线粘贴分享链接，无水印下载视频、提取音频、保存图文图片。
 
 ## 在线地址
 
 https://fzpnowm.top
 
+## 支持平台
+
+| 平台 | 提取方式 | 下载画质 |
+|------|---------|---------|
+| 抖音 | 直接 HTTP 爬取 | 1080p |
+| X/Twitter | fxtwitter API | 最高码率 |
+| TikTok | tikwm.com API | 最高画质 |
+| B站 | Bilibili API | 最高画质 |
+| 快手 | 移动端页面爬取 | Ultra 最高画质 |
+
 ## 功能
 
-- 视频无水印 MP4，可选 720p / 1080p / HD 画质
+- 视频无水印 MP4
 - MP3 音频提取
 - 图文作品逐张下载原图
 - 幻灯片自动合成 MP4（图片 + 背景音乐 → ffmpeg）
@@ -19,17 +29,16 @@ https://fzpnowm.top
 
 | 接口 | 说明 |
 |------|------|
-| `GET /api/info?url=<链接>` | 视频/图文信息 |
-| `GET /api/video?url=<链接>&quality=1080p` | 301 跳转无水印视频 |
-| `GET /api/image_redirect?url=<链接>&index=0` | 301 跳转图片 |
-| `GET /api` | 接口文档 |
+| `POST /api/parse` | 解析链接，返回视频信息 |
+| `GET /api/stream?video_url=<url>&quality=1080p` | 流式播放视频 |
+| `POST /api/download` | 下载视频/音频/图片 |
 
 ## 技术栈
 
 | 层 | 方案 |
 |---|------|
 | 后端 | Python FastAPI |
-| 下载引擎 | yt-dlp + 直接 HTTP 爬取 |
+| 下载引擎 | 平台 API + 直接 HTTP 爬取 + yt-dlp |
 | 前端 | HTML + Tailwind CSS + GSAP |
 | 设计 | Apple Liquid Glass |
 | 视频合成 | ffmpeg |
@@ -37,17 +46,17 @@ https://fzpnowm.top
 
 ## 源码
 
-https://github.com/f3271174706-tech/-tiktok-
+https://github.com/f3271174706-tech/douyin-downloader-2.0
 
 ## 本地开发
 
 ```bash
+cd douyin-downloader 2.0
 pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8000
+python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
-或：python -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload
 
-浏览器打开 `http://localhost:8000`。
+浏览器打开 http://localhost:8000
 
 ## 部署
 
@@ -55,9 +64,9 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 ## 依赖
 
-- Python 3.10+
+- Python 3.9+
 - FastAPI + uvicorn + httpx
-- yt-dlp + curl-cffi
+- yt-dlp
 - ffmpeg
 
 ## 成本
