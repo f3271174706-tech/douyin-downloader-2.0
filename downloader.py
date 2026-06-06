@@ -18,6 +18,11 @@ DOWNLOADS_DIR = Path(__file__).parent / "downloads"
 _system_proxies = urllib.request.getproxies()
 PROXY_URL = _system_proxies.get("http") or _system_proxies.get("https")
 
+# Set proxy env vars so httpx picks them up automatically (works with all httpx versions)
+if PROXY_URL:
+    os.environ.setdefault("HTTP_PROXY", PROXY_URL)
+    os.environ.setdefault("HTTPS_PROXY", PROXY_URL)
+
 # Simple in-memory cache to avoid hitting Douyin repeatedly for the same URL
 _cache: dict = {}
 _CACHE_TTL = 600  # 10 minutes
@@ -212,7 +217,7 @@ def _extract_tiktok(url: str) -> dict:
     """Extract TikTok video info via tikwm.com API (no IP block issues)."""
     api_url = "https://www.tikwm.com/api/"
     r = httpx.post(api_url, data={"url": url, "hd": 1},
-                   headers={"User-Agent": MOBILE_UA}, follow_redirects=True, timeout=20, proxy=PROXY_URL)
+                   headers={"User-Agent": MOBILE_UA}, follow_redirects=True, timeout=20)
     if r.status_code != 200:
         raise ValueError(f"tikwm API 返回 {r.status_code}")
 
@@ -245,7 +250,7 @@ def _extract_tiktok(url: str) -> dict:
 def _resolve_twitter_url(url: str) -> str:
     """Resolve t.co short links to full Twitter/X URL."""
     if "t.co/" in url:
-        r = httpx.get(url, headers={"User-Agent": MOBILE_UA}, follow_redirects=True, timeout=15, proxy=PROXY_URL)
+        r = httpx.get(url, headers={"User-Agent": MOBILE_UA}, follow_redirects=True, timeout=15)
         return str(r.url)
     return url
 
@@ -263,7 +268,7 @@ def _extract_twitter(url: str) -> dict:
     """Extract Twitter/X video info via fxtwitter API (no auth required)."""
     username, tweet_id = _parse_twitter_url(url)
     api_url = f"https://api.fxtwitter.com/{username}/status/{tweet_id}"
-    r = httpx.get(api_url, headers={"User-Agent": MOBILE_UA}, follow_redirects=True, timeout=15, proxy=PROXY_URL)
+    r = httpx.get(api_url, headers={"User-Agent": MOBILE_UA}, follow_redirects=True, timeout=15)
     if r.status_code != 200:
         raise ValueError(f"fxtwitter API 返回 {r.status_code}")
 
@@ -664,7 +669,7 @@ def _download_twitter_video(url: str) -> tuple[str, str]:
     if not video_url:
         raise ValueError("未能提取视频下载地址")
 
-    r = httpx.get(video_url, headers={"User-Agent": MOBILE_UA}, follow_redirects=True, timeout=120, proxy=PROXY_URL)
+    r = httpx.get(video_url, headers={"User-Agent": MOBILE_UA}, follow_redirects=True, timeout=120)
 
     safe_title = re.sub(r'[\n\r\t\\/*?:"<>|#]', '', info["title"])[:50]
     filename = f"{safe_title}.mp4" if safe_title else f"{uuid.uuid4().hex[:12]}.mp4"
@@ -728,7 +733,7 @@ def _download_tiktok(url: str) -> tuple[str, str]:
     if not video_url:
         raise ValueError("未能提取视频下载地址")
 
-    r = httpx.get(video_url, headers={"User-Agent": MOBILE_UA}, follow_redirects=True, timeout=120, proxy=PROXY_URL)
+    r = httpx.get(video_url, headers={"User-Agent": MOBILE_UA}, follow_redirects=True, timeout=120)
 
     safe_title = re.sub(r'[\n\r\t\\/*?:"<>|#]', '', info["title"])[:50]
     filename = f"{safe_title}.mp4" if safe_title else f"{uuid.uuid4().hex[:12]}.mp4"
@@ -787,20 +792,17 @@ def download_video_for_stream(video_url: str) -> tuple[str, str]:
     _ensure_downloads_dir()
 
     headers = {"User-Agent": MOBILE_UA}
-    proxy = None
     if "douyin" in video_url or "snssdk" in video_url:
         headers["Referer"] = "https://www.iesdouyin.com/"
     elif "video.twimg.com" in video_url:
         headers["Referer"] = "https://x.com/"
-        proxy = PROXY_URL
     elif "tiktokcdn" in video_url:
         headers["Referer"] = "https://www.tiktok.com/"
     elif "bilibili" in video_url or "bilivideo" in video_url or "hdslb" in video_url:
         headers["Referer"] = "https://www.bilibili.com/"
-        proxy = PROXY_URL
 
     verify = "kwaicdn" not in video_url and "kuaishou" not in video_url
-    r = httpx.get(video_url, headers=headers, follow_redirects=True, timeout=120, proxy=proxy, verify=verify)
+    r = httpx.get(video_url, headers=headers, follow_redirects=True, timeout=120, verify=verify)
 
     safe_name = f"{uuid.uuid4().hex[:12]}.mp4"
     filepath = str(DOWNLOADS_DIR / safe_name)
